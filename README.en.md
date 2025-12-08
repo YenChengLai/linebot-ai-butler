@@ -36,7 +36,7 @@ graph TD
     end
     
     subgraph GoogleServices ["🧠 Google AI & Data Services"]
-        Gemini["✨ Gemini 1.5 Flash <br/>(Semantic Analysis)"]
+        Gemini["✨ Gemini 2.5 Flash <br/>(Semantic Analysis)"]
         Calendar["📅 Google Calendar <br/>(Event Database)"]
     end
 
