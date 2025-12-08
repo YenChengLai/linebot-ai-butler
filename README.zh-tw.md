@@ -1,52 +1,57 @@
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](README.en.md)
+[![Traditional Chinese](https://img.shields.io/badge/lang-Traditional%20Chinese-red.svg)](README.zh-tw.md)
+
 # 🤖 AI Butler - Line Bot with Gemini & Google Calendar
 
 這是一個結合 **Google Gemini AI** 與 **Google Calendar** 的 LINE 聊天機器人。
-它可以理解自然語言，協助家庭或個人透過 LINE 輕鬆管理行程。
+它可以理解自然語言，協助家庭或個人透過 LINE 輕鬆管理行程，並以精美的 **Flex Message** 卡片呈現結果。
 
 ## ✨ 功能特色 (Features)
 
-* **自然語言處理**：不需要死板的指令，直接說「明天晚上七點吃飯」即可。
-* **行程管理**：自動將行程同步至 Google Calendar。
-* **行程查詢**：可以詢問「下週有哪些行程？」。
-* **群組支援**：在群組中需使用喚醒詞「管家」開頭，避免干擾日常對話。
+* **自然語言處理**：不需要死板的指令，直接說「明天晚上七點吃飯」或「下週有什麼行程？」即可。
+* **雙向整合**：
+  * **新增行程**：自動解析時間、地點、事項，同步至 Google Calendar。
+  * **查詢行程**：支援模糊查詢（如：未來一週），並回傳行程列表。
+* **UI 優化**：使用 **Line Flex Message** 呈現行程卡片與列表，介面清晰美觀。
+* **群組友善**：支援「喚醒詞（如：管家）」機制，在群組中不會干擾日常對話。
 * **Serverless 架構**：部署於 Google Cloud Functions (Gen 2)，低成本且高穩定性。
 
 ## 🏗️ 系統架構 (Architecture)
 
 ```mermaid
 graph TD
-    %% 1. 定義樣式類別 (Class Definitions)
+    %% 1. 定義樣式類別
     classDef line fill:#06c755,stroke:#fff,stroke-width:2px,color:#fff;
     classDef gcp fill:#4285F4,stroke:#fff,stroke-width:2px,color:#fff;
     classDef ai fill:#FFD700,stroke:#333,stroke-width:2px,color:#333;
     classDef user fill:#fff,stroke:#333,stroke-width:2px;
 
-    %% 2. 定義節點 (Nodes) - 使用引號包住文字以避免 Unicode 錯誤
+    %% 2. 定義節點
     User("👤 使用者/家庭成員")
     LineApp["📱 LINE App"]
     LinePlatform["LINE Messaging API"]
     
     subgraph GoogleCloud ["☁️ Google Cloud Platform"]
-        CloudFunc["⚡ Cloud Functions <br/>(Node.js Runtime)"]
+        CloudFunc["⚡ Cloud Functions <br/>(Node.js 20)"]
     end
     
     subgraph GoogleServices ["🧠 Google AI & Data Services"]
-        Gemini["✨ Gemini 2.5 Flash <br/>(語意分析 & 意圖判斷)"]
+        Gemini["✨ Gemini 2.5 Flash <br/>(語意分析)"]
         Calendar["📅 Google Calendar <br/>(行程資料庫)"]
     end
 
-    %% 3. 定義連線 (Relationships)
-    User -->|"1. 輸入訊息/喚醒詞"| LineApp
+    %% 3. 定義連線
+    User -->|"1. 輸入訊息 (喚醒詞)"| LineApp
     LineApp -->|"2. 傳送"| LinePlatform
     LinePlatform -->|"3. Webhook POST"| CloudFunc
     
-    CloudFunc <==>|"4. 分析語意 & 提取參數"| Gemini
-    CloudFunc <==>|"5. 新增或查詢行程"| Calendar
+    CloudFunc <==>|"4. 解析意圖 (Create/Query)"| Gemini
+    CloudFunc <==>|"5. 讀寫行程 (ISO 8601)"| Calendar
     
-    CloudFunc -->|"6. 回傳結果"| LinePlatform
-    LinePlatform -->|"7. 推播回覆"| LineApp
+    CloudFunc -->|"6. 產生 Flex Message"| LinePlatform
+    LinePlatform -->|"7. 顯示卡片"| LineApp
 
-    %% 4. 套用樣式 (Apply Classes) - 這是最穩定的寫法
+    %% 4. 套用樣式
     class User user
     class LineApp,LinePlatform line
     class CloudFunc,Calendar gcp
@@ -57,9 +62,10 @@ graph TD
 
 * **Runtime**: Node.js 20
 * **Cloud Platform**: Google Cloud Platform (Cloud Functions)
-* **AI Model**: Google Gemini 1.5 Flash
+* **AI Model**: Google Gemini 2.5 Flash
 * **Messaging**: LINE Messaging API
 * **Database**: Google Calendar API
+* **DevOps**: GitHub Actions(Optional), gCloud CLI
 
 ## 🚀 快速開始 (Quick Start)
 
