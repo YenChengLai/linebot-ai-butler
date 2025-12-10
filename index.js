@@ -3,6 +3,8 @@ const line = require('@line/bot-sdk');
 const { google } = require('googleapis');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+const { generateCreateSuccessFlex, generateFlexMessage } = require('./src/utils/lineMessage');
+
 if (process.env.NODE_ENV !== 'production') {
     require('dotenv').config();
 }
@@ -59,7 +61,7 @@ async function handleEvent(event) {
 
     if (!aiAnalysis) return null;
 
-    let replyText = "";
+    let replyMessage = "";
 
     // 3. 根據 AI 判斷的 Action 分流處理
     switch (aiAnalysis.action) {
@@ -70,11 +72,10 @@ async function handleEvent(event) {
             // 2. 判斷建立結果
             if (createResult.success) {
                 // 如果成功，回傳 Flex Message
-                const flexMsg = generateFlexMessage(aiAnalysis.params);
-                return client.replyMessage(event.replyToken, flexMsg);
+                replyMessage = generateCreateSuccessFlex(aiAnalysis.params);
             } else {
                 // 如果失敗，回傳錯誤文字
-                replyText = createResult.message;
+                replyMessage = { type: 'text', text: createResult.message };
             }
             break;
         case 'query':
@@ -85,25 +86,26 @@ async function handleEvent(event) {
             if (listResult.success) {
                 // 如果成功，呼叫剛剛寫好的 Flex Generator
                 // 注意：如果 events 是空陣列，Generator 裡面有處理會回傳文字
-                const flexMsg = generateListFlexMessage(listResult.events);
-                return client.replyMessage(event.replyToken, flexMsg);
+                replyMessage = generateFlexMessage(listResult.events);
             } else {
                 // 失敗則回傳錯誤訊息
-                replyText = listResult.message;
+                replyMessage = { type: 'text', text: listResult.message };
             }
             break;
         case 'delete':
-            replyText = "🗑️ 刪除功能比較危險，建議您直接點連結進入日曆刪除喔！";
+            replyMessage = { type: 'text', text: "🗑️ 刪除功能比較危險，建議您直接點連結進入日曆刪除喔！" };
             break;
         case 'chat':
-            replyText = aiAnalysis.response; // 直接回覆 AI 的閒聊內容
+            replyMessage = { type: 'text', text: aiAnalysis.response };
             break;
         default:
             // 如果 AI 判斷不出來，就不回覆 (避免吵鬧)
             return null;
     }
 
-    return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
+    if (replyMessage) {
+        return client.replyMessage(event.replyToken, replyMessage);
+    }
 }
 
 // V2: 新的 Prompt 設計
@@ -165,27 +167,13 @@ async function createCalendarEvent(params) {
 async function listCalendarEvents(params) {
     try {
         // 1. 處理開始時間 (TimeMin)
-        let minDate;
-        if (params.timeMin) {
-            minDate = new Date(params.timeMin);
-        } else {
-            minDate = new Date(); // 沒給就用現在
-        }
-
-        // 如果日期無效 (Invalid Date)，就強制重設為現在
-        if (isNaN(minDate.getTime())) {
-            minDate = new Date();
-        }
+        let minDate = params.timeMin ? new Date(params.timeMin) : new Date();
+        if (isNaN(minDate.getTime())) minDate = new Date();
 
         // 2. 處理結束時間 (TimeMax)
-        let maxDate;
-        if (params.timeMax) {
-            maxDate = new Date(params.timeMax);
-        } else {
-            // 沒給就預設 7 天後
-            maxDate = new Date(minDate);
-            maxDate.setDate(maxDate.getDate() + 7);
-        }
+        let maxDate = params.timeMax ? new Date(params.timeMax) : new Date(minDate);
+        // 如果沒給結束時間，預設+7天
+        if (!params.timeMax) maxDate.setDate(maxDate.getDate() + 7);
 
         // 如果日期無效，也強制重設為 7 天後
         if (isNaN(maxDate.getTime())) {
@@ -216,220 +204,3 @@ async function listCalendarEvents(params) {
     }
 }
 
-// 產生 Flex Message 卡片
-function generateFlexMessage(data) {
-    // 計算活動時間長度 (或是顯示區間)
-    const startTime = new Date(data.startTime);
-    const endTime = new Date(data.endTime);
-
-    const dateStr = startTime.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', weekday: 'short' });
-    const timeStr = `${startTime.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit' })} - ${endTime.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit' })}`;
-
-    // Google Calendar 連結 (讓使用者點擊後可以跳轉到日曆查看詳情)
-    // 這裡我們用簡單的日曆首頁，因為直接連結到特定 Event 需要 Event ID (insert 時會回傳)
-    const calendarUrl = "https://calendar.google.com/calendar/u/0/r";
-
-    return {
-        type: "flex",
-        altText: `📅 已建立行程：${data.title}`,
-        contents: {
-            type: "bubble",
-            size: "mega",
-            header: {
-                type: "box",
-                layout: "vertical",
-                contents: [
-                    {
-                        type: "text",
-                        text: "✅ 行程已建立",
-                        color: "#06C755",
-                        weight: "bold",
-                        size: "sm"
-                    },
-                    {
-                        type: "text",
-                        text: data.title,
-                        weight: "bold",
-                        size: "xxl",
-                        margin: "md",
-                        wrap: true
-                    }
-                ],
-                backgroundColor: "#f7f9fa",
-                paddingAll: "20px"
-            },
-            body: {
-                type: "box",
-                layout: "vertical",
-                contents: [
-                    {
-                        type: "box",
-                        layout: "horizontal",
-                        contents: [
-                            {
-                                type: "text",
-                                text: "📅",
-                                size: "lg",
-                                flex: 1
-                            },
-                            {
-                                type: "text",
-                                text: dateStr,
-                                size: "lg",
-                                color: "#555555",
-                                flex: 6,
-                                weight: "bold"
-                            }
-                        ],
-                        margin: "md"
-                    },
-                    {
-                        type: "box",
-                        layout: "horizontal",
-                        contents: [
-                            {
-                                type: "text",
-                                text: "⏰",
-                                size: "lg",
-                                flex: 1
-                            },
-                            {
-                                type: "text",
-                                text: timeStr,
-                                size: "md",
-                                color: "#555555",
-                                flex: 6
-                            }
-                        ],
-                        margin: "md"
-                    }
-                ],
-                paddingAll: "20px"
-            },
-            footer: {
-                type: "box",
-                layout: "vertical",
-                contents: [
-                    {
-                        type: "button",
-                        action: {
-                            type: "uri",
-                            label: "開啟 Google 日曆",
-                            uri: calendarUrl
-                        },
-                        style: "primary",
-                        color: "#4285F4"
-                    }
-                ]
-            }
-        }
-    };
-}
-
-// 產生「行程列表」的 Flex Message
-function generateListFlexMessage(events) {
-    // 如果沒有行程，回傳簡單文字即可 (或是你可以設計一個「目前空閒」的卡片)
-    if (!events || events.length === 0) {
-        return { type: 'text', text: '📅 目前沒有找到行程喔！' };
-    }
-
-    // 動態產生行程列 (Rows)
-    const eventRows = events.map((event) => {
-        // 判斷是「全天」還是「特定時間」
-        const isAllDay = !event.start.dateTime;
-        const start = event.start.dateTime || event.start.date;
-        const dateObj = new Date(start);
-
-        // 格式化日期：12/08 (週一)
-        const dateStr = dateObj.toLocaleString('zh-TW', {
-            timeZone: 'Asia/Taipei',
-            month: 'numeric', day: 'numeric', weekday: 'short'
-        });
-
-        // 格式化時間：14:00 (如果是全天就顯示 "全天")
-        const timeStr = isAllDay ? "全天" : dateObj.toLocaleString('zh-TW', {
-            timeZone: 'Asia/Taipei',
-            hour: '2-digit', minute: '2-digit', hour12: false
-        });
-
-        return {
-            type: "box",
-            layout: "horizontal",
-            contents: [
-                {
-                    type: "text",
-                    text: `${dateStr} ${timeStr}`,
-                    size: "xs",
-                    color: "#888888",
-                    flex: 4
-                },
-                {
-                    type: "text",
-                    text: event.summary || "(無標題)",
-                    size: "sm",
-                    color: "#111111",
-                    weight: "bold",
-                    flex: 6,
-                    wrap: true
-                }
-            ],
-            margin: "md",
-            spacing: "sm" // 讓內容緊湊一點
-        };
-    });
-
-    // 回傳 Flex Message 物件
-    return {
-        type: "flex",
-        altText: "📅 您的行程清單",
-        contents: {
-            type: "bubble",
-            size: "mega", //稍微寬一點
-            header: {
-                type: "box",
-                layout: "vertical",
-                contents: [
-                    {
-                        type: "text",
-                        text: "🔍 查詢結果",
-                        color: "#4285F4", // Google Blue
-                        weight: "bold",
-                        size: "sm"
-                    },
-                    {
-                        type: "text",
-                        text: `未來行程 (${events.length})`,
-                        weight: "bold",
-                        size: "xl",
-                        margin: "md"
-                    }
-                ],
-                backgroundColor: "#f7f9fa",
-                paddingAll: "20px"
-            },
-            body: {
-                type: "box",
-                layout: "vertical",
-                // 這裡放入我們剛剛動態生成的 Rows
-                contents: eventRows,
-                paddingAll: "20px"
-            },
-            footer: {
-                type: "box",
-                layout: "vertical",
-                contents: [
-                    {
-                        type: "button",
-                        action: {
-                            type: "uri",
-                            label: "開啟 Google 日曆",
-                            uri: "https://calendar.google.com/calendar/u/0/r"
-                        },
-                        style: "link",
-                        height: "sm"
-                    }
-                ]
-            }
-        }
-    };
-}
