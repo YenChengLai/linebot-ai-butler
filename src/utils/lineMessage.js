@@ -8,176 +8,312 @@ function formatEventData(event) {
     const start = event.start.dateTime || event.start.date;
     const end = event.end.dateTime || event.end.date;
     const dateObj = new Date(start);
-    const endObj = new Date(end);
 
-    // 日期：12/13 (六)
-    const dateStr = dateObj.toLocaleString('zh-TW', {
+    // 取得單純的日期字串 (YYYY-MM-DD) 用來分組
+    const dateKey = dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+
+    // 顯示用的日期：12/10 (Wed)
+    const displayDate = dateObj.toLocaleString('en-US', {
         timeZone: 'Asia/Taipei',
         month: 'numeric',
         day: 'numeric',
         weekday: 'short'
     });
 
-    // 時間：09:00 (如果是全天則顯示 "全天")
-    const timeStr = isAllDay ? "全天" : dateObj.toLocaleString('zh-TW', {
+    // 時間：14:00 (全天顯示 "All Day")
+    const timeStr = isAllDay ? "All Day" : dateObj.toLocaleString('zh-TW', {
         timeZone: 'Asia/Taipei',
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
     });
 
-    // 地點：如果有地點就顯示，沒有就顯示結束時間
-    let locationOrDuration = event.location || "";
-    if (!locationOrDuration && !isAllDay) {
-        // 如果沒地點，改顯示結束時間 (e.g., ~ 10:00)
-        const endTimeStr = endObj.toLocaleString('zh-TW', {
-            timeZone: 'Asia/Taipei',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        });
-        locationOrDuration = `~ ${endTimeStr}`;
-    }
+    // 地點
+    const location = event.location || "";
 
     return {
-        summary: event.summary || "(無標題)",
-        date: dateStr,
+        rawDate: dateObj, // 用來排序
+        dateKey,          // 用來分組
+        displayDate,      // 顯示在標題
         time: timeStr,
-        location: locationOrDuration,
-        link: event.htmlLink || "https://calendar.google.com/calendar/u/0/r"
+        summary: event.summary || "(No Title)",
+        location: location,
+        // 判斷是否為重要行程 (標題包含 "重要" 或 "Important")
+        isImportant: (event.summary && (event.summary.includes("重要") || event.summary.includes("Important")))
     };
 }
 
 /**
- * 產生單張卡片 Bubble (依照你的 Template 設計)
+ * 產生「未來行程總覽」的 Flex Message (Timeline Style)
  */
-function createBubble(event) {
-    const data = formatEventData(event);
-
-    return {
-        type: "bubble",
-        size: "mega", // 卡片寬度
-        body: {
-            type: "box",
-            layout: "vertical",
-            contents: [
-                // 1. 頂部標籤 (綠色小字)
-                {
-                    type: "text",
-                    text: "🔍 未來行程",
-                    weight: "bold",
-                    color: "#1DB446",
-                    size: "sm"
-                },
-                // 2. 主標題 (XXL 粗體)
-                {
-                    type: "text",
-                    text: data.summary,
-                    weight: "bold",
-                    size: "xxl",
-                    margin: "md",
-                    wrap: true
-                },
-                // 3. 副標題 (日期) - 原本是 "找到一筆結果"，改為顯示日期比較實用
-                {
-                    type: "text",
-                    text: data.date, // e.g. 12/13 (六)
-                    size: "xs",
-                    color: "#aaaaaa",
-                    wrap: true,
-                    margin: "xs"
-                },
-                // 4. 分隔線
-                {
-                    type: "separator",
-                    margin: "xxl"
-                },
-                // 5. 底部資訊欄 (時間 + 地點)
-                {
-                    type: "box",
-                    layout: "horizontal",
-                    margin: "md",
-                    contents: [
-                        // 左下：時間
-                        {
-                            type: "text",
-                            text: data.time, // e.g. 09:00
-                            size: "xs",
-                            color: "#aaaaaa",
-                            flex: 0
-                        },
-                        // 右下：地點 (靠右對齊)
-                        {
-                            type: "text",
-                            text: data.location, // e.g. Toyota 新莊...
-                            color: "#aaaaaa",
-                            size: "xs",
-                            align: "end",
-                            wrap: true,
-                            flex: 1
-                        }
-                    ]
-                }
-            ],
-            // 點擊卡片跳轉到 Google 日曆
-            action: {
-                type: "uri",
-                label: "Open Calendar",
-                uri: data.link
-            }
-        },
-        styles: {
-            footer: {
-                separator: true
-            }
-        }
-    };
-}
-
-/**
- * 產生 Flex Message (支援 Carousel 輪播)
- */
-function generateFlexMessage(events) {
-    // 1. 如果沒行程
+function generateOverviewFlex(events) {
     if (!events || events.length === 0) {
         return { type: 'text', text: '📅 目前沒有找到相關行程喔！' };
     }
 
-    // 2. 製作 Bubbles 陣列 (最多 12 張，LINE 上限)
-    const bubbles = events.slice(0, 12).map(event => createBubble(event));
+    // 1. 將行程依「日期」分組
+    const groupedEvents = {};
+    events.forEach(event => {
+        const data = formatEventData(event);
+        if (!groupedEvents[data.dateKey]) {
+            groupedEvents[data.dateKey] = {
+                dateLabel: data.displayDate, // e.g. 12/10 (Wed)
+                items: []
+            };
+        }
+        groupedEvents[data.dateKey].items.push(data);
+    });
 
-    // 3. 回傳 Carousel 容器
+    // 2. 準備 Header 的日期區間 (e.g., 12/10 - 12/15)
+    const sortedKeys = Object.keys(groupedEvents).sort();
+    const startDate = groupedEvents[sortedKeys[0]].dateLabel;
+    const endDate = groupedEvents[sortedKeys[sortedKeys.length - 1]].dateLabel;
+    const dateRangeText = (sortedKeys.length > 1) ? `${startDate} - ${endDate}` : startDate;
+
+    // 3. 動態建構 Body 內容
+    const bodyContents = [];
+
+    sortedKeys.forEach((key, index) => {
+        const group = groupedEvents[key];
+
+        // A. 加入日期標頭 (如果是今天，可以加個 "Today")
+        // 這裡簡單處理，直接顯示日期
+        bodyContents.push({
+            type: "box",
+            layout: "vertical",
+            contents: [
+                {
+                    type: "text",
+                    text: group.dateLabel, // e.g. 12/10 (Wed)
+                    weight: "bold",
+                    size: "sm",
+                    color: "#2B3467"
+                },
+                {
+                    type: "separator",
+                    margin: "sm",
+                    color: "#2B3467"
+                }
+            ],
+            margin: index === 0 ? "none" : "xl" // 第一個日期不需要上邊距
+        });
+
+        // B. 加入該日期的所有行程
+        group.items.forEach(item => {
+            // 設定顏色：如果是重要行程用紅色(#E63946)，否則用深灰(#111111)
+            const titleColor = item.isImportant ? "#E63946" : "#111111";
+            const timeColor = item.isImportant ? "#E63946" : "#888888";
+
+            bodyContents.push({
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                    // 左側：時間
+                    {
+                        type: "text",
+                        text: item.time,
+                        size: "sm",
+                        color: timeColor,
+                        flex: 0,
+                        gravity: "top", // 對齊上方
+                        weight: "bold",
+                        margin: "xs"
+                    },
+                    // 右側：事項與地點
+                    {
+                        type: "box",
+                        layout: "vertical",
+                        contents: [
+                            {
+                                type: "text",
+                                text: item.summary,
+                                size: "sm",
+                                color: titleColor,
+                                wrap: true,
+                                weight: item.isImportant ? "bold" : "regular"
+                            },
+                            // 只有當地點存在時才顯示
+                            ...(item.location ? [{
+                                type: "text",
+                                text: item.location,
+                                size: "xs",
+                                color: "#aaaaaa",
+                                margin: "xs",
+                                wrap: true
+                            }] : [])
+                        ],
+                        flex: 1,
+                        margin: "md"
+                    }
+                ],
+                margin: "lg"
+            });
+        });
+    });
+
+    // 4. 回傳完整的 Flex Message JSON
     return {
         type: "flex",
-        altText: `🔍 找到 ${events.length} 個行程`,
+        altText: `📅 未來行程總覽 (${events.length})`,
         contents: {
-            type: "carousel", // 使用輪播容器
-            contents: bubbles
+            type: "bubble",
+            size: "mega",
+            header: {
+                type: "box",
+                layout: "vertical",
+                contents: [
+                    {
+                        type: "box",
+                        layout: "horizontal",
+                        contents: [
+                            {
+                                type: "image", // 使用日曆 Icon
+                                url: "https://cdn-icons-png.flaticon.com/512/2693/2693507.png",
+                                flex: 0,
+                                aspectMode: "fit",
+                                size: "sm"
+                            },
+                            {
+                                type: "text",
+                                text: "未來行程總覽",
+                                weight: "bold",
+                                color: "#ffffff",
+                                size: "lg",
+                                gravity: "center",
+                                margin: "md",
+                                flex: 1
+                            }
+                        ]
+                    },
+                    {
+                        type: "text",
+                        text: dateRangeText, // 顯示日期區間
+                        color: "#b7c0ce",
+                        size: "xs",
+                        margin: "sm"
+                    }
+                ],
+                backgroundColor: "#2B3467",
+                paddingAll: "20px",
+                paddingBottom: "15px"
+            },
+            body: {
+                type: "box",
+                layout: "vertical",
+                contents: bodyContents // 放入動態生成的內容
+            },
+            footer: {
+                type: "box",
+                layout: "vertical",
+                contents: [
+                    {
+                        type: "button",
+                        action: {
+                            type: "uri",
+                            label: "打開 Google 日曆",
+                            uri: "https://calendar.google.com/calendar/u/0/r"
+                        },
+                        style: "primary",
+                        color: "#2B3467",
+                        height: "sm"
+                    }
+                ],
+                backgroundColor: "#f8f9fa"
+            }
         }
     };
 }
 
-// 為了相容 Create 功能，我們也可以用同樣的卡片設計
+/**
+ * 產生單一行程建立成功的卡片 (維持原本設計，稍微配合新風格微調顏色)
+ */
 function generateCreateSuccessFlex(params) {
-    // 模擬一個 Event 物件結構
-    const mockEvent = {
-        summary: params.title,
-        start: { dateTime: params.startTime },
-        end: { dateTime: params.endTime },
-        location: "" // 新增時通常還沒解析地點，留空
-    };
+    // 🕵️‍♂️ 修正時區問題 (Timezone Fix)
+    // Gemini 有時候回傳的時間格式是 "2025-12-12T10:30:00" (少了時區)
+    // 在 Cloud Function (UTC 環境) 會被當作 UTC 時間，導致轉回台灣時間時 +8 小時
 
-    // 產生單張 Bubble
-    const bubble = createBubble(mockEvent);
+    let startTimeStr = params.startTime;
 
-    // 修改一下頂部文字，讓它跟查詢有所區別
-    bubble.body.contents[0].text = "✅ 行程已建立";
+    // 如果字串結尾沒有 'Z' (UTC) 也沒有 '+' (時區偏移)，就手動補上台灣時區
+    if (startTimeStr && !startTimeStr.endsWith('Z') && !startTimeStr.includes('+')) {
+        startTimeStr += '+08:00';
+    }
+
+    const dt = new Date(startTimeStr);
+
+    // 格式化顯示時間
+    const dateStr = dt.toLocaleString('zh-TW', {
+        timeZone: 'Asia/Taipei',
+        month: 'numeric',
+        day: 'numeric',
+        weekday: 'short'
+    });
+
+    const timeStr = dt.toLocaleString('zh-TW', {
+        timeZone: 'Asia/Taipei',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false // 使用 24 小時制比較不容易看錯，或者你可以改回 true
+    });
 
     return {
         type: "flex",
         altText: `✅ 行程已建立：${params.title}`,
-        contents: bubble
+        contents: {
+            type: "bubble",
+            size: "mega",
+            body: {
+                type: "box",
+                layout: "vertical",
+                contents: [
+                    {
+                        type: "text",
+                        text: "✅ 行程已建立",
+                        weight: "bold",
+                        color: "#1DB446",
+                        size: "sm"
+                    },
+                    {
+                        type: "text",
+                        text: params.title,
+                        weight: "bold",
+                        size: "xl", // 稍微放大標題
+                        margin: "md",
+                        wrap: true
+                    },
+                    {
+                        type: "box",
+                        layout: "horizontal",
+                        margin: "md",
+                        contents: [
+                            {
+                                type: "text",
+                                text: dateStr, // e.g. 12/12 (五)
+                                size: "sm",
+                                color: "#666666",
+                                flex: 0
+                            },
+                            {
+                                type: "text",
+                                text: timeStr, // e.g. 10:30
+                                size: "sm",
+                                color: "#111111",
+                                weight: "bold",
+                                align: "end"
+                            }
+                        ]
+                    }
+                ],
+                paddingAll: "20px"
+            },
+            styles: {
+                footer: {
+                    separator: true
+                }
+            }
+        }
     };
 }
 
-module.exports = { generateFlexMessage, generateCreateSuccessFlex };
+// 匯出函式 (注意：查詢用的函式名稱改為 generateOverviewFlex)
+module.exports = { generateOverviewFlex, generateCreateSuccessFlex };

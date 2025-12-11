@@ -2,8 +2,10 @@ const { http } = require('@google-cloud/functions-framework');
 const line = require('@line/bot-sdk');
 const { google } = require('googleapis');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const fs = require('fs');
+const path = require('path');
 
-const { generateCreateSuccessFlex, generateFlexMessage } = require('./src/utils/lineMessage');
+const { generateCreateSuccessFlex, generateOverviewFlex } = require('./src/utils/lineMessage');
 
 if (process.env.NODE_ENV !== 'production') {
     require('dotenv').config();
@@ -22,6 +24,20 @@ const auth = new google.auth.GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/calendar'],
 });
 const calendar = google.calendar({ version: 'v3', auth });
+
+function loadPrompt(userInput) {
+    const filePath = path.join(__dirname, 'src', 'prompts', 'systemPrompt.txt');
+    let promptTemplate = fs.readFileSync(filePath, 'utf-8');
+
+    // 計算現在時間
+    const now = new Date();
+    const timeStr = now.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+
+    // 替換佔位符
+    return promptTemplate
+        .replace('{{CURRENT_TIME}}', timeStr)
+        .replace('{{USER_INPUT}}', userInput);
+}
 
 http('lineWebhook', async (req, res) => {
     if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
@@ -86,7 +102,7 @@ async function handleEvent(event) {
             if (listResult.success) {
                 // 如果成功，呼叫剛剛寫好的 Flex Generator
                 // 注意：如果 events 是空陣列，Generator 裡面有處理會回傳文字
-                replyMessage = generateFlexMessage(listResult.events);
+                replyMessage = generateOverviewFlex(listResult.events);
             } else {
                 // 失敗則回傳錯誤訊息
                 replyMessage = { type: 'text', text: listResult.message };
@@ -110,26 +126,7 @@ async function handleEvent(event) {
 
 // V2: 新的 Prompt 設計
 async function parseIntentWithGemini(text) {
-    const now = new Date();
-    const timeStr = now.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
-
-    const prompt = `
-    Context: Current time in Taiwan is ${timeStr}.
-    User Input: "${text}"
-    
-    You are a smart personal assistant. Analyze the user's intent and categorize it into one of the following actions:
-    
-    1. "create": User wants to schedule an event. Extract "title", "startTime", "endTime" (ISO 8601). If no end time, assume 1 hour.
-    2. "query": User wants to know about upcoming events. Extract "timeMin" (ISO 8601) and "timeMax" (ISO 8601). If they say "tomorrow", verify the specific date range.
-    3. "chat": General conversation or greeting. Provide a brief, friendly "response".
-    
-    Response MUST be valid JSON only. NO markdown.
-    
-    Examples:
-    - Input: "明天晚上七點吃飯" -> {"action": "create", "params": {"title": "吃飯", "startTime": "...", "endTime": "..."}}
-    - Input: "明天有什麼行程？" -> {"action": "query", "params": {"timeMin": "...", "timeMax": "..."}}
-    - Input: "你好" -> {"action": "chat", "response": "你好！我是你的行程小管家，有什麼需要幫忙的嗎？"}
-  `;
+    const prompt = loadPrompt(text);
 
     try {
         const result = await model.generateContent(prompt);
@@ -148,17 +145,15 @@ async function createCalendarEvent(params) {
             calendarId: process.env.CALENDAR_ID,
             requestBody: {
                 summary: params.title,
+                location: params.location || "",
+                description: params.description || "",
                 start: { dateTime: params.startTime, timeZone: 'Asia/Taipei' },
                 end: { dateTime: params.endTime, timeZone: 'Asia/Taipei' },
             },
         });
-
-        // 回傳成功狀態，不需組字串了，交給 Flex Message 處理
         return { success: true };
-
     } catch (error) {
         console.error("Calendar Error:", error);
-        // 回傳失敗訊息
         return { success: false, message: `❌ 建立失敗: ${error.message}` };
     }
 }
@@ -193,11 +188,21 @@ async function listCalendarEvents(params) {
             timeMax: timeMaxISO,
             singleEvents: true,
             orderBy: 'startTime',
-            maxResults: 10,
+            maxResults: 20,
         });
 
-        return { success: true, events: res.data.items };
+        const allEvents = res.data.items;
+        const now = new Date();
 
+        const futureEvents = allEvents.filter(event => {
+            const eventEndTime = new Date(event.end.dateTime || event.end.date);
+            return eventEndTime > now;
+        });
+
+        // 如果過濾完只剩 10 個以內，就全顯示，太多截斷
+        const finalEvents = futureEvents.slice(0, 10);
+
+        return { success: true, events: finalEvents };
     } catch (error) {
         console.error("List Error:", error);
         return { success: false, message: `❌ 查詢失敗: ${error.message}` };
