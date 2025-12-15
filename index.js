@@ -94,6 +94,26 @@ async function handleEvent(event) {
                 replyMessage = { type: 'text', text: createResult.message };
             }
             break;
+        // 處理批量建立
+        case 'batch_create':
+            const eventsToCreate = aiAnalysis.params.events;
+            let successCount = 0;
+            let failCount = 0;
+            
+            // 平行處理所有建立請求 (加快速度)
+            const results = await Promise.all(eventsToCreate.map(evt => createCalendarEvent(evt)));
+            
+            results.forEach(res => {
+                if (res.success) successCount++;
+                else failCount++;
+            });
+
+            // 回傳簡單的彙整報告 (你可以之後再寫漂亮的 Flex Message)
+            replyMessage = {
+                type: 'text',
+                text: `✅ 批量建立完成！\n成功：${successCount} 筆\n失敗：${failCount} 筆`
+            };
+            break;
         case 'query':
             // 1. 取得資料
             const listResult = await listCalendarEvents(aiAnalysis.params);

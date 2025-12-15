@@ -15,6 +15,7 @@ It understands natural language, helping families or individuals easily manage s
 * **UI Optimization**: Uses **LINE Flex Messages** to present event cards and lists with a clean and aesthetic interface.
 * **Group Friendly**: Supports a "Trigger Word" mechanism (e.g., "Butler") to avoid disrupting daily conversations in group chats.
 * **Serverless Architecture**: Deployed on Google Cloud Functions (Gen 2) for low cost and high stability.
+* **Batch Event Creation (New!)**: Supports listing multiple dates and times in a single message (e.g., for recurring therapy or classes). The AI applies a "Shared Title Strategy" to create multiple events instantly.
 
 ## 🏗️ Architecture
 
@@ -134,6 +135,9 @@ gcloud functions deploy line-bot-function \
 
 * **Create Event**: "Butler, take my son to get vaccinated tomorrow at 3 PM"
 * **Query Event**: "Butler, what's on the schedule this week?"
+* **Batch Create**: 
+  > User: "Butler, 12/19 09:00, 12/26 09:00, English Conversation"
+  > Bot: (Automatically creates two events titled "English Conversation")
 
 ## 👤 Author
 
