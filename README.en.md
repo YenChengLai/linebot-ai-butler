@@ -95,10 +95,10 @@ graph TD
     Copy `.env.example` to `.env` and fill in the following information:
 
     ```env
-    CHANNEL_ACCESS_TOKEN=你的LINE_Token
-    CHANNEL_SECRET=你的LINE_Secret
-    GEMINI_API_KEY=你的Gemini_Key
-    CALENDAR_ID=你的Google日曆ID
+    CHANNEL_ACCESS_TOKEN=<your LINE_Token>
+    CHANNEL_SECRET=<your LINE_Secret>
+    GEMINI_API_KEY=<your Gemini_Key>
+    CALENDAR_ID=<your Google Calendar ID>
     ```
 
 4. **Start Local Server**
